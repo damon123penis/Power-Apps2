@@ -1,6 +1,5 @@
 Screens:
   LE_Checkliste:
-    Control: Screen@1.0
     Properties:
       Fill: =RGBA(255,255,255,1)
       OnVisible: |-
