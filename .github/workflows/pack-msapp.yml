@@ -69,6 +69,25 @@ jobs:
           Write-Host "=== LE_Checkliste head ==="
           Get-Content "./work/src/Src/LE_Checkliste.pa.yaml" -TotalCount 10
 
+      - name: Normalize patched screens (remove Screen Control)
+        shell: pwsh
+        run: |
+          $files = @(
+            "./work/src/Src/LE_Checkliste.pa.yaml",
+            "./work/src/Src/Validierungen.pa.yaml"
+          )
+
+          foreach ($f in $files) {
+            if (!(Test-Path $f)) { throw "Missing file: $f" }
+
+            $lines = Get-Content $f
+
+            # Entfernt genau die Zeile "    Control: Screen@..." direkt unter dem Screen-Knoten
+            $new = $lines | Where-Object { $_ -notmatch '^\s{4}Control:\s*Screen@' }
+
+            Set-Content -Path $f -Value $new -Encoding utf8
+          }
+
       - name: Validate sources
         shell: pwsh
         run: |
