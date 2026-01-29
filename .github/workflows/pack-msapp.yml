@@ -1,59 +1,49 @@
-name: Pack Canvas App to MSAPP
+name: Repack Canvas App from baseline msapp
 
 on:
   workflow_dispatch:
 
 jobs:
-  pack:
+  repack:
     runs-on: windows-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
 
-      # ✅ Pin pac auf eine ältere, oft stabilere Version
-      - name: Install Power Platform CLI (pac) - pinned
+      - name: Install pac (pinned)
         shell: pwsh
         run: |
           dotnet tool install --global Microsoft.PowerApps.CLI.Tool --version 2.0.1
           echo "$env:USERPROFILE\.dotnet\tools" >> $env:GITHUB_PATH
-          pac help
+          pac help | Out-Null
 
-      - name: Unpack Canvas App source
+      - name: Unpack baseline msapp to sources
         shell: pwsh
         run: |
-          if (Test-Path "./canvas-App") { Remove-Item "./canvas-App" -Recurse -Force }
-          New-Item -ItemType Directory -Path "./canvas-App" | Out-Null
-          Expand-Archive -Path "./LE-App2.zip" -DestinationPath "./canvas-App"
+          if (Test-Path "./work") { Remove-Item "./work" -Recurse -Force }
+          New-Item -ItemType Directory -Path "./work/src" | Out-Null
+          pac canvas unpack --msapp "./baseline/LE-App.msapp" --sources "./work/src"
 
-          # Debug: zeig die Top-Level Struktur
-          Get-ChildItem "./canvas-App" | Select-Object Name
-
-      # ✅ Vor dem Packen validieren (zeigt dir i.d.R. die echte Ursache)
-      - name: Validate sources
+      - name: Apply patched screens
         shell: pwsh
         run: |
-          pac canvas validate --directory "./canvas-App"
+          Copy-Item "./patch/Src/Validierungen.pa.yaml" "./work/src/Src/Validierungen.pa.yaml" -Force
+          Copy-Item "./patch/Src/LE_Checkliste.pa.yaml" "./work/src/Src/LE_Checkliste.pa.yaml" -Force
 
-      - name: Pack msapp
+      - name: Validate
         shell: pwsh
         run: |
-          pac canvas pack --sources "./canvas-App" --msapp "./LE-App.msapp"
+          pac canvas validate --directory "./work/src"
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Pack new msapp
+        shell: pwsh
+        run: |
+          pac canvas pack --sources "./work/src" --msapp "./LE-App_patched.msapp"
+
+      - uses: actions/upload-artifact@v4
         with:
-          name: LE-App-msapp
-          path: ./LE-App.msapp
-
-      # ✅ Wenn was schiefgeht: pac-log.txt ausgeben
-      - name: Dump pac log on failure
-        if: failure()
-        shell: pwsh
-        run: |
-          $log = "C:\Users\runneradmin\.dotnet\tools\.store\microsoft.powerapps.cli.tool\2.0.1\microsoft.powerapps.cli.tool\2.0.1\tools\net8.0\any\logs\pac-log.txt"
-          if (Test-Path $log) { Get-Content $log -Raw } else { Write-Host "pac-log not found at $log" }
+          name: LE-App_patched-msapp
+          path: ./LE-App_patched.msapp
