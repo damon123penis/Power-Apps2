@@ -1,0 +1,32 @@
+name: Pack Canvas App to MSAPP
+
+on:
+  workflow_dispatch:
+
+jobs:
+  pack:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Installiert Power Platform Tools inkl. pac (über Microsoft Action)
+      - name: Install Power Platform Tools
+        uses: microsoft/powerplatform-actions/actions-install@v1
+
+      - name: Unzip source
+        shell: pwsh
+        run: |
+         Expand-Archive -Path "./canvas-App/LE-App2.zip" -DestinationPath "./canvas-App"
+
+      - name: Pack msapp
+        shell: pwsh
+        run: |
+          pac canvas pack --sources "./canvas-App" --msapp "./LE-App.msapp"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LE-App-msapp
+          path: ./LE-App.msapp
