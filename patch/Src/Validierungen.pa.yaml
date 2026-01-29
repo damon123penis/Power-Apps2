@@ -1,0 +1,408 @@
+Screens:
+  Validierungen:
+    Control: Screen@1.0
+    Properties:
+      Fill: =RGBA(255, 255, 255, 1)
+      OnVisible: |-
+        =// -------- Init & Defaults --------
+        Set(varValSearch, "");
+        Set(varLEContact, "Alle");
+        Set(varLEPeriod, "Alle");
+        Set(varValType, "Alle");
+        Set(varAttrName, "Alle");
+        Set(varPageSize, 50);
+        Set(varPage, 1);
+        Set(varFilterTick, 0);
+        Set(varSaveState, Blank());
+        Set(varSaveTick, 0);
+        // Verbindung / Offline
+        Set(varIsOffline, !Connection.Connected);
+        // -------- Picklisten einmalig laden (Caching) --------
+        // Betreuer (SPO Gesellschaftsliste)
+        ClearCollect(
+          colLEContacts;
+          Table({Value:"Alle"}) &
+          SortByColumns(
+            AddColumns(
+              Distinct(Filter(Gesellschaftsliste, !IsBlank('LE Contact'.DisplayName)), 'LE Contact'.DisplayName);
+              "Value";
+              Coalesce(ThisRecord.Result, ThisRecord.Value)
+            );
+            "Value";
+            SortOrder.Ascending
+          )
+        );
+        // Validierungstypen (Excel Tabelle2)
+        ClearCollect(
+          colValTypesList;
+          Table({Value:"Alle"}) &
+          SortByColumns(
+            AddColumns(Distinct(Tabelle2, Text(Validierungstyp)), "Value", Coalesce(ThisRecord.Result, ThisRecord.Value));
+            "Value";
+            SortOrder.Ascending
+          )
+        );
+        // Attributnamen (Excel Tabelle2)
+        ClearCollect(
+          colAttrNamesAll;
+          Table({Value:"Alle"}) &
+          SortByColumns(
+            AddColumns(Distinct(Tabelle2, Text(Attributname)), "Value", Coalesce(ThisRecord.Result, ThisRecord.Value));
+            "Value";
+            SortOrder.Ascending
+          )
+        );
+        // Perioden (LE_Checkliste)
+        ClearCollect(
+          colPeriodsAll;
+          Table({Value:"Alle"}) &
+          SortByColumns(
+            AddColumns(Distinct('LE Checkliste', Text(Periode)), "Value", Coalesce(ThisRecord.Result, ThisRecord.Value));
+            "Value";
+            SortOrder.Ascending
+          )
+        );
+        // Optional: Voll-Datensatz lokal cachen (wenn SaveData/LoadData aktiviert ist)
+        If(
+          varIsOffline;
+          // Versuche aus lokalem Cache zu laden
+          LoadData(colT2Cache, "t2cache", true);
+          Blank()
+        );
+        // Erste Datenladung auslösen
+        Select(btnApplyFilters)
+    Children:
+    - conRoot:
+        Control: GroupContainer@1.4.0
+        Properties:
+          Direction: Vertical
+          Width: =Parent.Width
+          Height: =Parent.Height
+          PaddingLeft: 16
+          PaddingRight: 16
+          PaddingTop: 12
+          PaddingBottom: 12
+        Children:
+        - conFilters:
+            Control: GroupContainer@1.4.0
+            Properties:
+              Direction: Horizontal
+              Width: =Parent.Width
+              Height: 64
+              Gap: 12
+              Wrap: true
+            Children:
+            - ddLEContact:
+                Control: Dropdown@2.3.1
+                Properties:
+                  Default: =varLEContact
+                  Items: colLEContacts
+                  OnChange: |-
+                    =Set(varLEContact, Coalesce(Self.Selected.Value, "Alle"));
+                    Set(varPage, 1);
+                    Set(varFilterTick, varFilterTick + 1);
+                    // Periode auf 'Alle' zurücksetzen, da abhängig von Betreuer
+                    Set(varLEPeriod, "Alle");
+                  Width: 260
+            - ddPeriod:
+                Control: Dropdown@2.3.1
+                Properties:
+                  Default: =varLEPeriod
+                  Items: |-
+                    =If(
+                      varLEContact="Alle";
+                      colPeriodsAll;
+                      Table({Value:"Alle"}) &
+                      SortByColumns(
+                        AddColumns(
+                          Distinct(Filter('LE Checkliste', !IsBlank(Periode) && 'LE Contact'.DisplayName = varLEContact), Text(Periode));
+                          "Value";
+                          Coalesce(ThisRecord.Result, ThisRecord.Value)
+                        );
+                        "Value";
+                        SortOrder.Ascending
+                      )
+                    )
+                  OnChange: |-
+                    =Set(varLEPeriod, Coalesce(Self.Selected.Value, "Alle"));
+                    Set(varPage, 1);
+                    Set(varFilterTick, varFilterTick + 1)
+                  Width: 180
+            - ddValType:
+                Control: Dropdown@2.3.1
+                Properties:
+                  Default: =varValType
+                  Items: colValTypesList
+                  OnChange: |-
+                    =Set(varValType, Coalesce(Self.Selected.Value, "Alle"));
+                    Set(varPage, 1);
+                    Set(varFilterTick, varFilterTick + 1);
+                    // Attributnamenliste ggf. einschränken
+                    If(
+                      varValType="Alle";
+                      ClearCollect(colAttrNamesFiltered, colAttrNamesAll);
+                      ClearCollect(
+                        colAttrNamesFiltered;
+                        Table({Value:"Alle"}) &
+                        SortByColumns(
+                          AddColumns(
+                            Distinct(Filter(Tabelle2, Text(Validierungstyp)=varValType), Text(Attributname));
+                            "Value";
+                            Coalesce(ThisRecord.Result, ThisRecord.Value)
+                          );
+                          "Value";
+                          SortOrder.Ascending
+                        )
+                      )
+                    )
+                  Width: 180
+            - ddAttrName:
+                Control: Dropdown@2.3.1
+                Properties:
+                  Default: =varAttrName
+                  Items: =If(varValType="Alle", colAttrNamesAll, colAttrNamesFiltered)
+                  OnChange: |-
+                    =Set(varAttrName, Coalesce(Self.Selected.Value, "Alle"));
+                    Set(varPage, 1);
+                    Set(varFilterTick, varFilterTick + 1)
+                  Width: 260
+            - txtSearch:
+                Control: TextInput@0.0.54
+                Properties:
+                  Default: =varValSearch
+                  HintText: Suchen…
+                  DelayOutput: true
+                  OnChange: |-
+                    =Set(varValSearch, Self.Text);
+                    Set(varPage, 1);
+                    Set(varFilterTick, varFilterTick + 1)
+                  Width: 240
+            - tmrDebounce:
+                Control: Timer@2.1.0
+                Properties:
+                  Duration: 350
+                  Repeat: false
+                  AutoStart: false
+                  Start: =varFilterTick > 0
+                  OnTimerEnd: |-
+                    =Set(varFilterTick, 0);
+                    Select(btnApplyFilters)
+        - btnApplyFilters:
+            Control: Button@0.0.45
+            Properties:
+              Visible: false
+              Text: Apply
+              OnSelect: |-
+                =// ---------------- Datenverarbeitung mit minimalen Schnittstellenaufrufen ----------------
+                Set(varIsBusy, true);
+                Concurrent(
+                  // 1) Basis-Dataset aus Excel (delegierbare Gleichheitsfilter) + nur benötigte Spalten
+                  With(
+                    { lowerSearch: Lower(varValSearch) };
+                    If(
+                      // Offline: versuche Cache zu nutzen (falls vorhanden)
+                      varIsOffline && !IsEmpty(colT2Cache);
+                      ClearCollect(colT2Base, colT2Cache);
+                      ClearCollect(
+                        colT2Base;
+                        ShowColumns(
+                          Filter(
+                            Tabelle2;
+                            (varValType="Alle"    || Text(Validierungstyp)=varValType) &&
+                            (varAttrName="Alle"   || Text(Attributname)=varAttrName) &&
+                            (varLEPeriod="Alle"   || Text(Periode)=varLEPeriod)
+                          );
+                          "Ident"; "Attributname";
+                          "Attributwert1"; "Attributwert2"; "Attributwert3"; "Attributwert4"; "Attributwert5"; "Attributwert6";
+                          "Attributwert7"; "Attributwert8"; "Attributwert9"; "Attributwert10"; "Attributwert11"; "Attributwert12";
+                          "Kommentar"; "Validierungstyp"; "Periode"
+                        )
+                      )
+                    );
+                    // 1a) Freitextsuche lokal auf dem Resultat (nicht-delegierbar)
+                    If(
+                      varValSearch<>"";
+                      ClearCollect(
+                        colT2;
+                        Filter(
+                          colT2Base;
+                          Find(lowerSearch, Lower(Text(Ident)))>0 ||
+                          Find(lowerSearch, Lower(Text(Attributname)))>0
+                        )
+                      );
+                      ClearCollect(colT2, colT2Base)
+                    );
+                    // Optional: neuen Cache speichern (nur online)
+                    If(!varIsOffline, SaveData(colT2, "t2cache"))
+                  );
+
+                  // 2) Spaltenverfügbarkeit einmalig berechnen (HasData-Flags)
+                  Set(
+                    colHasData;
+                    {
+                      Attributname: true;
+                      Attributwert1:  CountIf(colT2, !IsBlank(Attributwert1))>0;
+                      Attributwert2:  CountIf(colT2, !IsBlank(Attributwert2))>0;
+                      Attributwert3:  CountIf(colT2, !IsBlank(Attributwert3))>0;
+                      Attributwert4:  CountIf(colT2, !IsBlank(Attributwert4))>0;
+                      Attributwert5:  CountIf(colT2, !IsBlank(Attributwert5))>0;
+                      Attributwert6:  CountIf(colT2, !IsBlank(Attributwert6))>0;
+                      Attributwert7:  CountIf(colT2, !IsBlank(Attributwert7))>0;
+                      Attributwert8:  CountIf(colT2, !IsBlank(Attributwert8))>0;
+                      Attributwert9:  CountIf(colT2, !IsBlank(Attributwert9))>0;
+                      Attributwert10: CountIf(colT2, !IsBlank(Attributwert10))>0;
+                      Attributwert11: CountIf(colT2, !IsBlank(Attributwert11))>0;
+                      Attributwert12: CountIf(colT2, !IsBlank(Attributwert12))>0
+                    }
+                  );
+
+                  // 3) Spaltenmapping (Attributnamen) nur mit vorhandenen Daten
+                  ClearCollect(
+                    colMap;
+                    SortByColumns(
+                      Filter(
+                        AddColumns(
+                          Filter(Attributnamen, (varValType="Alle" || Validierungstyp=varValType));
+                          "ColIndex";
+                          If(Attribut="Attributname", 1, Value(Substitute(Attribut, "Attributwert", ""))+1);
+                          "HasData";
+                          If(
+                            Attribut="Attributname";
+                            true;
+                            Switch(
+                              Attribut;
+                              "Attributwert1";  colHasData.Attributwert1;
+                              "Attributwert2";  colHasData.Attributwert2;
+                              "Attributwert3";  colHasData.Attributwert3;
+                              "Attributwert4";  colHasData.Attributwert4;
+                              "Attributwert5";  colHasData.Attributwert5;
+                              "Attributwert6";  colHasData.Attributwert6;
+                              "Attributwert7";  colHasData.Attributwert7;
+                              "Attributwert8";  colHasData.Attributwert8;
+                              "Attributwert9";  colHasData.Attributwert9;
+                              "Attributwert10"; colHasData.Attributwert10;
+                              "Attributwert11"; colHasData.Attributwert11;
+                              "Attributwert12"; colHasData.Attributwert12;
+                              true
+                            )
+                          )
+                        );
+                        HasData
+                      );
+                      "ColIndex";
+                      SortOrder.Ascending
+                    )
+                  );
+
+                  // 4) Zeilenliste & schneller Zugriff auf den Datensatz pro Ident
+                  ClearCollect(colGrouped, GroupBy(colT2, "Ident", "Rows"));
+                  ClearCollect(
+                    colRowsAll;
+                    SortByColumns(
+                      AddColumns(Distinct(colT2, Text(Ident)), "Ident", Coalesce(ThisRecord.Result, ThisRecord.Value));
+                      "Ident";
+                      SortOrder.Ascending
+                    )
+                  );
+                  ClearCollect(colRowsPage, FirstN(colRowsAll, varPageSize * varPage));
+                  // Pro Zeile gleich den Datensatz referenzieren (für Zellenanzeige)
+                  ClearCollect(
+                    colRowDataPage;
+                    AddColumns(
+                      colRowsPage;
+                      "rec";
+                      First(LookUp(colGrouped, Ident=Ident).Rows)
+                    )
+                  )
+                );
+                // Saved State reset
+                Set(varSaveState, Blank());
+                Set(varIsBusy, false)
+        - conSavedToast:
+            Control: GroupContainer@1.4.0
+            Properties:
+              Direction: Horizontal
+              Width: =Parent.Width
+              Height: 32
+              Visible: =!IsBlank(varSaveState)
+            Children:
+            - lblSaved:
+                Control: Text@0.0.51
+                Properties:
+                  Text: =Switch( varSaveState, "saving", "Speichern…", "saved",  "Gespeichert", "error",  "Fehler beim Speichern",
+                    "" )
+        - conHeaderAndGrid:
+            Control: GroupContainer@1.4.0
+            Properties:
+              Direction: Vertical
+              Width: =Parent.Width
+              Height: =Parent.Height - conFilters.Height - 32
+              Gap: 8
+            Children:
+            - galHeader:
+                Control: Gallery@2.15.0
+                Properties:
+                  Items: colMap
+                  TemplateSize: =Max(100, RoundDown((Parent.Width - 40) / Max(1, CountRows(colMap)), 0))
+                  Height: 40
+                  WrapCount: =Max(1, RoundDown(Parent.Width / Max(100, Min(180, Parent.Width/Max(1,CountRows(colMap)))), 0))
+                  ShowScrollbar: false
+                  DelayItemLoading: true
+                  LoadingSpinner: LoadingSpinner.Data
+            - galRows:
+                Control: Gallery@2.15.0
+                Properties:
+                  Items: colRowDataPage
+                  TemplateSize: 44
+                  Height: =Parent.Height - galHeader.Height - 56
+                  ShowScrollbar: true
+                  DelayItemLoading: true
+                  LoadingSpinner: =If(varIsBusy, LoadingSpinner.Data, LoadingSpinner.None)
+            - btnLoadMore:
+                Control: Button@0.0.45
+                Properties:
+                  Text: Mehr laden
+                  Visible: =CountRows(colRowsPage) < CountRows(colRowsAll)
+                  OnSelect: |-
+                    =Set(varPage, varPage + 1);
+                    ClearCollect(colRowsPage, FirstN(colRowsAll, varPageSize * varPage));
+                    ClearCollect(
+                      colRowDataPage;
+                      AddColumns(
+                        colRowsPage;
+                        "rec";
+                        First(LookUp(colGrouped, Ident=Ident).Rows)
+                      )
+                    )
+            - tmrSaveDebounce:
+                Control: Timer@2.1.0
+                Properties:
+                  Duration: 900
+                  Repeat: false
+                  AutoStart: false
+                  Start: =varSaveTick > 0
+                  OnTimerEnd: |-
+                    =Set(varSaveTick, 0);
+                    IfError(
+                      ForAll(
+                        colCommentQueue;
+                        UpdateIf(
+                          Tabelle2;
+                          Text(Ident)=Text(ThisRecord.Ident);
+                          { Kommentar: ThisRecord.Kommentar }
+                        )
+                      );
+                      Set(varSaveState, "error");
+                      Set(varSaveState, "saved")
+                    );
+                    Clear(colCommentQueue);
+                    // Auto-hide
+                    Set(varSavedHideTick, Now())
+            - tmrSavedHide:
+                Control: Timer@2.1.0
+                Properties:
+                  Duration: 1500
+                  Repeat: false
+                  AutoStart: false
+                  Start: =varSaveState="saved"
+                  OnTimerEnd: =Set(varSaveState, Blank())

@@ -1,0 +1,226 @@
+Screens:
+  LE_Checkliste:
+    Control: Screen@1.0
+    Properties:
+      Fill: =RGBA(255,255,255,1)
+      OnVisible: |-
+        =// -------- Defaults --------
+        Set(varLESearch, "");
+        Set(varLEContact, "Alle");
+        Set(varLEPeriod, "Alle");
+        Set(varLEPageSize, If(App.Width < 600, 30, 50)); // mobil kleineres Page-Size
+        Set(varLEPage, 1);
+        Set(varLEFilterTick, 0);
+        Set(varIsOffline, !Connection.Connected);
+        Set(varIsBusy, false);
+
+        // -------- Picklisten einmalig laden (Caching) --------
+        // Betreuer aus Gesellschaftsliste
+        ClearCollect(
+          colContacts;
+          Table({Value:"Alle"}) &
+          SortByColumns(
+            AddColumns(
+              Distinct(Filter(Gesellschaftsliste, !IsBlank('LE Contact'.DisplayName)), 'LE Contact'.DisplayName);
+              "Value"; Coalesce(ThisRecord.Result, ThisRecord.Value)
+            );
+            "Value"; SortOrder.Ascending
+          )
+        );
+
+        // Perioden (vollständige Liste – unabhängig von Betreuer)
+        ClearCollect(
+          colPeriodsAll;
+          Table({Value:"Alle"}) &
+          SortByColumns(
+            AddColumns(Distinct('LE Checkliste', Text(Periode)), "Value", Coalesce(ThisRecord.Result, ThisRecord.Value));
+            "Value"; SortOrder.Ascending
+          )
+        );
+        // Aktive Perioden-Collection: initial alle
+        ClearCollect(colPeriods, colPeriodsAll);
+
+        // Optional: Ergebnis-Cache laden (falls offline verfügbar)
+        If(varIsOffline, LoadData(colLECache, "lecheck_cache", true));
+
+        // Erste Datenladung
+        Select(btnLEApplyFilters)
+    Children:
+    - conRoot_LE:
+        Control: GroupContainer@1.4.0
+        Properties:
+          Direction: Vertical
+          Width: =Parent.Width
+          Height: =Parent.Height
+          PaddingLeft: 16
+          PaddingRight: 16
+          PaddingTop: 12
+          PaddingBottom: 12
+          Gap: 10
+        Children:
+        - conHeader:
+            Control: GroupContainer@1.4.0
+            Properties:
+              Direction: Horizontal
+              Width: =Parent.Width
+              Height: 44
+              AlignInContainer: Stretch
+              Gap: 10
+            Children:
+            - lblTitle:
+                Control: Text@0.0.51
+                Properties:
+                  Text: LE Checkliste
+                  Size: 18
+                  FontWeight: Semibold
+        - conFilters:
+            Control: GroupContainer@1.4.0
+            Properties:
+              Direction: Horizontal
+              Width: =Parent.Width
+              Height: =If(App.Width < 600, 88, 64)
+              Wrap: true
+              Gap: 12
+            Children:
+            - ddLEContact:
+                Control: Dropdown@2.3.1
+                Properties:
+                  Default: =varLEContact
+                  Items: colContacts
+                  OnChange: |-
+                    =Set(varLEContact, Coalesce(Self.Selected.Value, "Alle"));
+                    Set(varLEPage, 1);
+                    // Perioden abhängig vom Betreuer vorab berechnen (Items greifen dann lokal zu)
+                    If(
+                      varLEContact="Alle";
+                      ClearCollect(colPeriods, colPeriodsAll);
+                      ClearCollect(
+                        colPeriods;
+                        Table({Value:"Alle"}) &
+                        SortByColumns(
+                          AddColumns(
+                            Distinct(
+                              Filter('LE Checkliste', !IsBlank(Periode) && 'LE Contact'.DisplayName = varLEContact);
+                              Text(Periode)
+                            );
+                            "Value"; Coalesce(ThisRecord.Result, ThisRecord.Value)
+                          );
+                          "Value"; SortOrder.Ascending
+                        )
+                      )
+                    );
+                    Set(varLEPeriod, "Alle");
+                    Set(varLEFilterTick, varLEFilterTick + 1)
+                  Width: 260
+            - ddLEPeriod:
+                Control: Dropdown@2.3.1
+                Properties:
+                  Default: =varLEPeriod
+                  Items: colPeriods
+                  OnChange: |-
+                    =Set(varLEPeriod, Coalesce(Self.Selected.Value, "Alle"));
+                    Set(varLEPage, 1);
+                    Set(varLEFilterTick, varLEFilterTick + 1)
+                  Width: 180
+            - txtLESearch:
+                Control: TextInput@0.0.54
+                Properties:
+                  Default: =varLESearch
+                  HintText: Suchen… (Contains)
+                  DelayOutput: true
+                  OnChange: |-
+                    =Set(varLESearch, Self.Text);
+                    Set(varLEPage, 1);
+                    Set(varLEFilterTick, varLEFilterTick + 1)
+                  Width: =If(App.Width < 600, Parent.Width - 20, 260)
+            - tmrLEDebounce:
+                Control: Timer@2.1.0
+                Properties:
+                  Duration: 350
+                  Repeat: false
+                  AutoStart: false
+                  Start: =varLEFilterTick > 0
+                  OnTimerEnd: |-
+                    =Set(varLEFilterTick, 0);
+                    Select(btnLEApplyFilters)
+        - btnLEApplyFilters:
+            Control: Button@0.0.45
+            Properties:
+              Visible: false
+              Text: Apply
+              OnSelect: |-
+                =Set(varIsBusy, true);
+                With(
+                  { lowerSearch: Lower(varLESearch) };
+                  Concurrent(
+                    // 1) Basis-Filter delegierbar auf SPO + nur benötigte Spalten laden
+                    If(
+                      varIsOffline && !IsEmpty(colLECache);
+                      ClearCollect(colLEBase, colLECache);
+                      ClearCollect(
+                        colLEBase;
+                        ShowColumns(
+                          Filter(
+                            'LE Checkliste';
+                            (varLEContact="Alle" || 'LE Contact'.DisplayName = varLEContact) &&
+                            (varLEPeriod="Alle" || Text(Periode)=varLEPeriod)
+                          );
+                          "Title"; "Ident"; "Entity ID"; "Periode"; "LE Contact"
+                        )
+                      )
+                    );
+
+                    // 2) Lokale Contains-Suche (nicht delegierbar) auf bereits reduziertem Set
+                    If(
+                      varLESearch <> "";
+                      ClearCollect(
+                        colLEFiltered;
+                        Filter(
+                          colLEBase;
+                          Find(lowerSearch, Lower(Coalesce(Text(Title), ""))) > 0 ||
+                          Find(lowerSearch, Lower(Coalesce(Text(Ident), ""))) > 0 ||
+                          Find(lowerSearch, Lower(Coalesce(Text('Entity ID'), ""))) > 0
+                        )
+                      );
+                      ClearCollect(colLEFiltered, colLEBase)
+                    );
+
+                    // 3) Sortierung (z.B. Periode absteigend, dann Title)
+                    ClearCollect(
+                      colLEAllSorted;
+                      SortByColumns(colLEFiltered, "Periode", SortOrder.Descending, "Title", SortOrder.Ascending)
+                    );
+
+                    // 4) Paging
+                    ClearCollect(colLEPage, FirstN(colLEAllSorted, varLEPageSize * varLEPage));
+
+                    // 5) Optional: neuen Cache speichern (nur online)
+                    If(!varIsOffline, SaveData(colLEBase, "lecheck_cache"))
+                  )
+                );
+                Set(varIsBusy, false)
+        - conList:
+            Control: GroupContainer@1.4.0
+            Properties:
+              Direction: Vertical
+              Width: =Parent.Width
+              Height: =Parent.Height - conHeader.Height - conFilters.Height - 20
+              Gap: 8
+            Children:
+            - galLE:
+                Control: Gallery@2.15.0
+                Properties:
+                  Items: colLEPage
+                  TemplateSize: =If(App.Width < 600, 78, 68)
+                  Height: =Parent.Height - 44
+                  ShowScrollbar: true
+                  DelayItemLoading: true
+                  LoadingSpinner: =If(varIsBusy, LoadingSpinner.Data, LoadingSpinner.None)
+            - btnLoadMore:
+                Control: Button@0.0.45
+                Properties:
+                  Text: Mehr laden
+                  Visible: =CountRows(colLEPage) < CountRows(colLEAllSorted)
+                  OnSelect: |-
+                    =Set(varLEPage, varLEPage + 1);
+                    ClearCollect(colLEPage, FirstN(colLEAllSorted, varLEPageSize * varLEPage))
