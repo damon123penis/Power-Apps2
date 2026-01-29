@@ -11,15 +11,33 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Installiert Power Platform Tools inkl. pac (über Microsoft Action)
-      - name: Install Power Platform Tools
-        uses: microsoft/powerplatform-actions/actions-install@v1
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
 
-      - name: Unzip source
+      - name: Install Power Platform CLI (pac)
         shell: pwsh
         run: |
-         Expand-Archive -Path "./canvas-App/LE-App2.zip" -DestinationPath "./canvas-App"
+          dotnet tool install --global Microsoft.PowerApps.CLI.Tool
+          echo "$env:USERPROFILE\.dotnet\tools" >> $env:GITHUB_PATH
 
+      - name: Verify pac
+        shell: pwsh
+        run: |
+          pac --version
+
+      # 👉 ZIP aus dem Repo nach canvas-App entpacken
+      - name: Unpack Canvas App source
+        shell: pwsh
+        run: |
+          if (Test-Path "./canvas-App") {
+            Remove-Item "./canvas-App" -Recurse -Force
+          }
+          New-Item -ItemType Directory -Path "./canvas-App" | Out-Null
+          Expand-Archive -Path "./LE-App2.zip" -DestinationPath "./canvas-App"
+
+      # 👉 .msapp bauen
       - name: Pack msapp
         shell: pwsh
         run: |
