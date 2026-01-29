@@ -22,11 +22,6 @@ jobs:
           dotnet tool install --global Microsoft.PowerApps.CLI.Tool
           echo "$env:USERPROFILE\.dotnet\tools" >> $env:GITHUB_PATH
 
-      - name: Verify pac
-        shell: pwsh
-        run: |
-          pac --version
-
       # 👉 ZIP aus dem Repo nach canvas-App entpacken
       - name: Unpack Canvas App source
         shell: pwsh
