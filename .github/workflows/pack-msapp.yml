@@ -30,7 +30,7 @@ jobs:
             Remove-Item "./canvas-App" -Recurse -Force
           }
           New-Item -ItemType Directory -Path "./canvas-App" | Out-Null
-          Expand-Archive -Path "./LE-App2.zip" -DestinationPath "./canvas-App"
+          Expand-Archive -Path "./canvas-App/LE-App2.zip" -DestinationPath "./canvas-App"
 
       # 👉 .msapp bauen
       - name: Pack msapp
