@@ -1,4 +1,4 @@
-name: Repack Canvas App from baseline msapp
+name: Repack Canvas App (.msapp) from baseline + patched screens
 
 on:
   workflow_dispatch:
@@ -6,34 +6,70 @@ on:
 jobs:
   repack:
     runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
 
-      - uses: actions/setup-dotnet@v4
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
 
-      - name: Install pac (pinned)
+      - name: Install Power Platform CLI (pac) - pinned
         shell: pwsh
         run: |
           dotnet tool install --global Microsoft.PowerApps.CLI.Tool --version 2.0.1
           echo "$env:USERPROFILE\.dotnet\tools" >> $env:GITHUB_PATH
           pac help | Out-Null
 
+      # Expect: baseline/LE-App.msapp exists in repo
       - name: Unpack baseline msapp to sources
         shell: pwsh
         run: |
           if (Test-Path "./work") { Remove-Item "./work" -Recurse -Force }
           New-Item -ItemType Directory -Path "./work/src" | Out-Null
+
+          if (!(Test-Path "./baseline/LE-App.msapp")) {
+            throw "Missing baseline/LE-App.msapp in repo. Add the working .msapp there."
+          }
+
           pac canvas unpack --msapp "./baseline/LE-App.msapp" --sources "./work/src"
 
+      # Remove folders that often cause validate noise (and are not needed for packing)
+      - name: Cleanup unpacked sources
+        shell: pwsh
+        run: |
+          if (Test-Path "./work/src/Other") { Remove-Item "./work/src/Other" -Recurse -Force }
+          if (Test-Path "./work/src/__MACOSX") { Remove-Item "./work/src/__MACOSX" -Recurse -Force }
+          Get-ChildItem "./work/src" | Select-Object Name
+
+      # Expect: patch/Src/Validierungen.pa.yaml and patch/Src/LE_Checkliste.pa.yaml exist in repo
       - name: Apply patched screens
         shell: pwsh
         run: |
-          Copy-Item "./patch/Src/Validierungen.pa.yaml" "./work/src/Src/Validierungen.pa.yaml" -Force
-          Copy-Item "./patch/Src/LE_Checkliste.pa.yaml" "./work/src/Src/LE_Checkliste.pa.yaml" -Force
+          $p1 = "./patch/Src/Validierungen.pa.yaml"
+          $p2 = "./patch/Src/LE_Checkliste.pa.yaml"
+          $t1 = "./work/src/Src/Validierungen.pa.yaml"
+          $t2 = "./work/src/Src/LE_Checkliste.pa.yaml"
 
-      - name: Validate
+          if (!(Test-Path $p1)) { throw "Missing patch file: $p1" }
+          if (!(Test-Path $p2)) { throw "Missing patch file: $p2" }
+          if (!(Test-Path "./work/src/Src")) { throw "Unpack did not create ./work/src/Src. Check baseline msapp." }
+
+          Copy-Item $p1 $t1 -Force
+          Copy-Item $p2 $t2 -Force
+
+      - name: Verify patched files (head)
+        shell: pwsh
+        run: |
+          Write-Host "=== Validierungen head ==="
+          Get-Content "./work/src/Src/Validierungen.pa.yaml" -TotalCount 10
+          Write-Host ""
+          Write-Host "=== LE_Checkliste head ==="
+          Get-Content "./work/src/Src/LE_Checkliste.pa.yaml" -TotalCount 10
+
+      - name: Validate sources
         shell: pwsh
         run: |
           pac canvas validate --directory "./work/src"
@@ -43,7 +79,30 @@ jobs:
         run: |
           pac canvas pack --sources "./work/src" --msapp "./LE-App_patched.msapp"
 
-      - uses: actions/upload-artifact@v4
+      - name: Upload msapp artifact
+        uses: actions/upload-artifact@v4
         with:
           name: LE-App_patched-msapp
           path: ./LE-App_patched.msapp
+
+      # If something fails, try to print pac logs to help debugging
+      - name: Dump pac logs on failure
+        if: failure()
+        shell: pwsh
+        run: |
+          $root = "C:\Users\runneradmin\.dotnet\tools\.store"
+          Write-Host "Searching pac-log.txt under $root ..."
+          $logs = Get-ChildItem $root -Recurse -Force -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -eq "pac-log.txt" } |
+            Select-Object -First 5
+
+          if ($null -eq $logs -or $logs.Count -eq 0) {
+            Write-Host "No pac-log.txt found."
+            exit 0
+          }
+
+          foreach ($l in $logs) {
+            Write-Host ""
+            Write-Host "===== $($l.FullName) ====="
+            Get-Content $l.FullName -Raw
+          }
