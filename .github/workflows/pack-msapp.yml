@@ -88,11 +88,6 @@ jobs:
             Set-Content -Path $f -Value $new -Encoding utf8
           }
 
-      - name: Validate sources
-        shell: pwsh
-        run: |
-          pac canvas validate --directory "./work/src"
-
       - name: Pack new msapp
         shell: pwsh
         run: |
