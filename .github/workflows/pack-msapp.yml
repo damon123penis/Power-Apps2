@@ -6,7 +6,6 @@ on:
 jobs:
   pack:
     runs-on: windows-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -16,23 +15,30 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
-      - name: Install Power Platform CLI (pac)
+      # ✅ Pin pac auf eine ältere, oft stabilere Version
+      - name: Install Power Platform CLI (pac) - pinned
         shell: pwsh
         run: |
-          dotnet tool install --global Microsoft.PowerApps.CLI.Tool
+          dotnet tool install --global Microsoft.PowerApps.CLI.Tool --version 2.0.1
           echo "$env:USERPROFILE\.dotnet\tools" >> $env:GITHUB_PATH
+          pac help
 
-      # 👉 ZIP aus dem Repo nach canvas-App entpacken
       - name: Unpack Canvas App source
         shell: pwsh
         run: |
-          if (Test-Path "./canvas-App") {
-            Remove-Item "./canvas-App" -Recurse -Force
-          }
+          if (Test-Path "./canvas-App") { Remove-Item "./canvas-App" -Recurse -Force }
           New-Item -ItemType Directory -Path "./canvas-App" | Out-Null
           Expand-Archive -Path "./LE-App2.zip" -DestinationPath "./canvas-App"
 
-      # 👉 .msapp bauen
+          # Debug: zeig die Top-Level Struktur
+          Get-ChildItem "./canvas-App" | Select-Object Name
+
+      # ✅ Vor dem Packen validieren (zeigt dir i.d.R. die echte Ursache)
+      - name: Validate sources
+        shell: pwsh
+        run: |
+          pac canvas validate --directory "./canvas-App"
+
       - name: Pack msapp
         shell: pwsh
         run: |
@@ -43,3 +49,11 @@ jobs:
         with:
           name: LE-App-msapp
           path: ./LE-App.msapp
+
+      # ✅ Wenn was schiefgeht: pac-log.txt ausgeben
+      - name: Dump pac log on failure
+        if: failure()
+        shell: pwsh
+        run: |
+          $log = "C:\Users\runneradmin\.dotnet\tools\.store\microsoft.powerapps.cli.tool\2.0.1\microsoft.powerapps.cli.tool\2.0.1\tools\net8.0\any\logs\pac-log.txt"
+          if (Test-Path $log) { Get-Content $log -Raw } else { Write-Host "pac-log not found at $log" }
